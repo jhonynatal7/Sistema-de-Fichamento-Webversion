@@ -14,7 +14,7 @@ def get_connection():
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
         client = gspread.authorize(creds)
-        # Tenta abrir a planilha (CUIDADO: O nome deve ser EXATO)
+        # Tenta abrir a planilha
         sheet = client.open("Fichamento_DB") 
         return sheet
     except Exception as e:
@@ -43,7 +43,7 @@ def add_obra(titulo, subtitulo, autor, edicao, local, editora, ano,
            paginas, volume, folhas, serie, notas, is_online, url, data_acesso, tipo]
     wk.append_row(row)
     
-    # IMPORTANTE: Limpa o cache para que a nova obra apareça imediatamente
+    # Limpa o cache para que a nova obra apareça imediatamente
     st.cache_data.clear()
 
 def add_ficha(obra_id, pagina, conceito, ideia_central, definicao, relacao, citacoes, tags):
@@ -55,7 +55,7 @@ def add_ficha(obra_id, pagina, conceito, ideia_central, definicao, relacao, cita
     row = [new_id, obra_id, pagina, conceito, ideia_central, definicao, relacao, citacoes, tags]
     wk.append_row(row)
     
-    # IMPORTANTE: Limpa o cache para atualizar a tabela
+    # Limpa o cache para atualizar a tabela
     st.cache_data.clear()
 
 # --- READ (Cache Data = Guarda os dados na memória) ---
@@ -100,7 +100,6 @@ def get_fichas_completas():
     if not sh: return []
     
     try:
-        # Isto é pesado (2 chamadas de API), por isso o Cache é vital
         data_fichas = sh.worksheet("fichas").get_all_records()
         data_obras = sh.worksheet("obras").get_all_records()
     except:
@@ -117,7 +116,6 @@ def get_fichas_completas():
 
     df_obras = df_obras.rename(columns={'id': 'obra_id_ref'})
     
-    # Processamento pesado (Merge)
     full_df = pd.merge(df_fichas, df_obras, left_on='obra_id', right_on='obra_id_ref', how='inner')
     
     lista_final = []
@@ -139,7 +137,6 @@ def get_fichas_completas():
     return lista_final
 
 def search_fichas(termo):
-    # Usa a função cacheada acima, então é super rápido
     todos = get_fichas_completas()
     resultado = []
     t = str(termo).lower()
@@ -161,20 +158,29 @@ def delete_ficha(ficha_id):
             st.cache_data.clear() # Limpa cache para atualizar
     except: pass
 
-# Setup inicial
+# --- SETUP INICIAL (A CORREÇÃO ESTÁ AQUI) ---
 def init_db():
-    # Não precisa cachear o init
     sh = get_connection()
     if not sh: return
 
-    try: wk_o = sh.worksheet("obras")
-    except: wk_o = sh.add_worksheet("obras", 1000, 20)
-    if not wk_o.row_values(1):
-        wk_o.append_row(['id', 'titulo', 'subtitulo', 'autor', 'edicao', 'local', 'editora', 'ano', 
-                         'paginas', 'volume', 'folhas', 'serie', 'notas', 'is_online', 'url', 'data_acesso', 'tipo'])
-        
-    try: wk_f = sh.worksheet("fichas")
-    except: wk_f = sh.add_worksheet("fichas", 1000, 20)
-    if not wk_f.row_values(1):
-        wk_f.append_row(['id', 'obra_id', 'pagina', 'conceito', 'ideia_central', 'definicao_conceito', 
-                         'relacao_biblio', 'citacoes', 'tags'])
+    # Pega lista de nomes de abas existentes para evitar o erro "Already Exists"
+    existing_worksheets = [ws.title for ws in sh.worksheets()]
+
+    # 1. Configurar ABA OBRAS
+    if "obras" not in existing_worksheets:
+        try:
+            wk_o = sh.add_worksheet("obras", 1000, 20)
+            wk_o.append_row(['id', 'titulo', 'subtitulo', 'autor', 'edicao', 'local', 'editora', 'ano', 
+                             'paginas', 'volume', 'folhas', 'serie', 'notas', 'is_online', 'url', 'data_acesso', 'tipo'])
+        except: pass # Se der erro (ex: criou em paralelo), ignora
+    else:
+        # Se já existe, só garante que tem cabeçalho (opcional)
+        pass
+
+    # 2. Configurar ABA FICHAS
+    if "fichas" not in existing_worksheets:
+        try:
+            wk_f = sh.add_worksheet("fichas", 1000, 20)
+            wk_f.append_row(['id', 'obra_id', 'pagina', 'conceito', 'ideia_central', 'definicao_conceito', 
+                             'relacao_biblio', 'citacoes', 'tags'])
+        except: pass
